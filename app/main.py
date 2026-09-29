@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError as PydanticValidationError
 
-from .audit import AuditConflict, AuditStore, payload_fingerprint
+from .audit import (ACQUIRE_CONFLICT, ACQUIRE_OWNER, ACQUIRE_REPLAY,
+                    AuditStore, payload_fingerprint)
 from .models import SolveRequest, ValidationError, validate_request
 from .solver import EdgeSpec, NodeSpec, solve
 
@@ -23,6 +25,10 @@ app = FastAPI(
     description="精确整数：消去下界 → 可行流 → 残量网络负费用改进消除 → 站点势证书",
 )
 audit_store = AuditStore()
+
+# 求解专用线程池：等待同标识在途记录的请求会阻塞在事件循环默认线程池里，
+# 独立池保证持有预约的请求总能取得求解线程，不会被等待者饿死。
+_solve_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="mcf-solve")
 
 
 @app.exception_handler(PydanticValidationError)
@@ -77,39 +83,52 @@ async def api_solve(request: Request) -> JSONResponse:
     validate_request(req)
 
     fp = None
+    owns_reservation = False
     if req.audit_key:
         fp = payload_fingerprint(raw)
-        existing, conflict = audit_store.lookup_or_reserve(req.audit_key, fp)
-        if conflict:
+        # acquire 在同载荷在途时会阻塞等待，放到线程里以免卡住事件循环
+        outcome, record = await asyncio.to_thread(
+            audit_store.acquire, req.audit_key, fp)
+        if outcome == ACQUIRE_CONFLICT:
             return JSONResponse(
                 status_code=409,
                 content={"status": "audit_conflict",
                          "audit_key": req.audit_key,
                          "msg": "该审计标识已绑定其他载荷；同标识重传必须保持载荷一致"})
-        if existing is not None:
+        if outcome == ACQUIRE_REPLAY:
+            assert record is not None
             replay = {"status": "idempotent_replay",
                       "audit_key": req.audit_key,
                       "fingerprint": fp,
-                      "created_at": existing["created_at"],
-                      "result": existing["result"]}
+                      "created_at": record["created_at"],
+                      "result": record["result"]}
             return JSONResponse(content=replay)
+        assert outcome == ACQUIRE_OWNER
+        owns_reservation = True
 
     nodes = [NodeSpec(id=n.id, balance=n.balance) for n in req.nodes]
     edges = [EdgeSpec(id=e.id, u=e.source, v=e.target,
                       lower=e.lower, upper=e.upper, cost=e.cost)
              for e in req.edges]
-    result: dict[str, Any] = await asyncio.to_thread(solve, nodes, edges)
-
-    if req.audit_key:
-        assert fp is not None
-        record = audit_store.save(req.audit_key, fp, raw, result)
-        return JSONResponse(content={"status": "stored",
-                                     "audit_key": req.audit_key,
-                                     "fingerprint": fp,
-                                     "created_at": record["created_at"],
-                                     "result": result})
-
-    return JSONResponse(content=result)
+    try:
+        result: dict[str, Any] = await asyncio.get_running_loop() \
+            .run_in_executor(_solve_pool, solve, nodes, edges)
+        if req.audit_key:
+            assert fp is not None
+            record = audit_store.save(req.audit_key, fp, raw, result)
+            return JSONResponse(content={"status": "stored",
+                                         "audit_key": req.audit_key,
+                                         "fingerprint": fp,
+                                         "created_at": record["created_at"],
+                                         "result": result})
+        return JSONResponse(content=result)
+    except BaseException:
+        if owns_reservation:
+            # 求解失败 / 保存失败 / 请求被取消：回滚预约，
+            # 后续同标识请求重新求解，不会永久回放半成品
+            assert fp is not None
+            audit_store.release(req.audit_key, fp)
+        raise
 
 
 app.mount("/static",

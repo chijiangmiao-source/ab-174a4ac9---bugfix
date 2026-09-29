@@ -27,7 +27,12 @@
 
 - 请求带 `audit_key` 时，服务端对去掉该字段后的载荷做规范化 SHA-256 指纹并留档；
 - **同载荷重传**：返回原始记录（`idempotent_replay`，含原创建时间），不重新求解；
-- **改载荷复用同一标识**：HTTP 409 `audit_conflict` 拒绝，原记录不受影响；
+- **同载荷并发提交**：只形成一份最终记录——首个请求求解并保存期间，
+  其余同载荷请求等待其完成后复用同一创建时间与完整结果；
+  若首个请求求解失败/异常，预约即被回滚，后续同标识请求重新求解，
+  不会残留可永久回放的半成品；
+- **改载荷复用同一标识**：HTTP 409 `audit_conflict` 拒绝（含在途期间，立即拒绝），
+  原记录不受影响；
 - 记录可经 `GET /api/audit/{key}` 取回。
 
 ## 运行（Docker Compose）
@@ -53,7 +58,7 @@ docker compose up --abort-on-container-exit --exit-code-from verify verify
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest tests -q          # 41 项测试（含 100 个满规模 fuzz 算例）
+python -m pytest tests -q          # 48 项测试（含 100 个满规模 fuzz 算例与并发审计用例）
 uvicorn app.main:app --port 8080
 python scripts/verify_all.py       # 需先启动服务（WEB_BASE_URL 可覆盖）
 ```
