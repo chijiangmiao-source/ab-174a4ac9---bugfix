@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>校准液路最小费用流 · 求解台</title>
+<style>
+  :root {
+    --bg: #0f141b; --panel: #171e28; --panel2: #1d2734; --line: #2a3747;
+    --text: #e6edf5; --muted: #93a3b8; --accent: #4ea1ff; --accent2: #2d7d46;
+    --bad: #e5604f; --warn: #e3a13a; --ok: #4caf72;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; font-family: "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+    background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.55;
+  }
+  header {
+    padding: 18px 28px; border-bottom: 1px solid var(--line);
+    display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap;
+  }
+  header h1 { font-size: 19px; margin: 0; }
+  header .sub { color: var(--muted); font-size: 13px; }
+  main { padding: 22px 28px 60px; max-width: 1280px; margin: 0 auto; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }
+  .panel > h2 {
+    margin: 0; padding: 11px 16px; font-size: 14px; background: var(--panel2);
+    border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center;
+  }
+  .panel .body { padding: 14px 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 0; border-bottom: 1px solid var(--line); }
+  th { color: var(--muted); font-weight: 500; text-align: left; padding: 4px 6px; white-space: nowrap; }
+  td input { width: 100%; background: transparent; border: 1px solid transparent; color: var(--text);
+    padding: 6px 7px; font: inherit; border-radius: 5px; min-width: 0; }
+  td input:focus { outline: none; border-color: var(--accent); background: #0c1118; }
+  td.idcell input { font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+  .del { color: var(--bad); cursor: pointer; padding: 4px 8px; user-select: none; }
+  .rowbtns { display: flex; gap: 10px; margin-top: 10px; }
+  button {
+    background: var(--panel2); color: var(--text); border: 1px solid var(--line);
+    padding: 7px 14px; border-radius: 7px; cursor: pointer; font: inherit;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1c5da8; border-color: #2a74c8; font-weight: 600; }
+  button.primary:hover { background: #2370c4; }
+  .toolbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 18px 0; }
+  .toolbar label { color: var(--muted); }
+  .toolbar input[type=text] {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 8px 10px; border-radius: 7px; width: 250px; font: inherit;
+  }
+  #result { margin-top: 22px; }
+  .banner { padding: 13px 18px; border-radius: 9px; margin-bottom: 14px; font-weight: 600;
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .banner.ok { background: #14301f; border: 1px solid #2e6b45; }
+  .banner.bad { background: #38191a; border: 1px solid #7e3431; }
+  .banner.warn { background: #352a12; border: 1px solid #7a5b22; }
+  .banner .kpi { font-weight: 400; color: var(--muted); }
+  .banner .kpi b { color: var(--text); font-size: 15px; }
+  .errors { background: #2a1517; border: 1px solid #7e3431; border-radius: 9px; padding: 10px 16px; margin-bottom: 14px; }
+  .errors li { margin: 3px 0; }
+  .loc { font-family: ui-monospace, monospace; color: var(--warn); }
+  .res-table td, .res-table th { padding: 6px 8px; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; font-family: ui-monospace, Consolas, monospace; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 20px; font-size: 12px; border: 1px solid var(--line); }
+  .tag.good { color: var(--ok); border-color: #2e6b45; }
+  .tag.no { color: var(--bad); border-color: #7e3431; }
+  .muted { color: var(--muted); }
+  pre.ev { background: #0c1118; border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; overflow-x: auto; font-size: 12.5px; }
+  details summary { cursor: pointer; color: var(--muted); padding: 6px 0; }
+  .chips span { display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 6px; padding: 2px 9px; margin: 2px 4px 2px 0; font-family: ui-monospace, monospace; }
+  .section-title { margin: 18px 0 8px; font-size: 14px; color: var(--accent); }
+  .rc-neg { color: var(--bad); font-weight: 700; }
+  .rc-zero { color: var(--warn); }
+  .nowrap { white-space: nowrap; }
+  footer { color: var(--muted); font-size: 12px; text-align: center; padding: 26px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>低温光谱仪 · 校准液路最小费用流</h1>
+  <span class="sub">精确整数：消去下界 → Dinic 可行流 → 残量网络负费用改进消除 → 站点势约化费用证书（至多 12 站点 / 36 管路）</span>
+</header>
+<main>
+  <div class="grid">
+    <section class="panel">
+      <h2><span>站点（balance：正=净供应，负=净需求）</span><span class="muted" id="nodeCount"></span></h2>
+      <div class="body">
+        <table>
+          <thead><tr><th style="width:38%">标识</th><th>整数供需</th><th style="width:40px"></th></tr></thead>
+          <tbody id="nodeRows"></tbody>
+        </table>
+        <div class="rowbtns">
+          <button onclick="addNode()">+ 站点</button>
+          <button onclick="fillExample('basic')">载入：可行算例</button>
+          <button onclick="fillExample('infeasible')">载入：不可行算例</button>
+          <button onclick="fillExample('cycle')">载入：含负费用环</button>
+        </div>
+      </div>
+    </section>
+    <section class="panel">
+      <h2><span>有向管路（稳定标识 / 整数上下界 / 单位成本）</span><span class="muted" id="edgeCount"></span></h2>
+      <div class="body">
+        <table>
+          <thead><tr>
+            <th>标识</th><th>起点</th><th>终点</th><th>下界</th><th>上界</th><th>单位成本</th><th style="width:34px"></th>
+          </tr></thead>
+          <tbody id="edgeRows"></tbody>
+        </table>
+        <div class="rowbtns"><button onclick="addEdge()">+ 管路</button></div>
+      </div>
+    </section>
+  </div>
+
+  <div class="toolbar">
+    <label>稳定审计标识：</label>
+    <input type="text" id="auditKey" placeholder="可选；同载荷重传返原记录，改载荷复用将被拒绝">
+    <button class="primary" onclick="submitSolve()">提交真实 API 求解</button>
+    <span class="muted" id="submitStatus"></span>
+  </div>
+
+  <div id="errors"></div>
+  <div id="result"></div>
+</main>
+<footer>所有判定均在后端以整数完成 · 无浮点、无贪心分配、无固定轮次上限</footer>
+
+<script>
+const EXAMPLES = {
+  basic: {
+    nodes: [["S", 6], ["A", 0], ["B", 0], ["T", -6]],
+    edges: [
+      ["e1", "S", "A", 0, 4, 2],
+      ["e2", "S", "B", 0, 6, 5],
+      ["e3", "A", "B", 0, 3, 1],
+      ["e4", "A", "T", 0, 5, 7],
+      ["e5", "B", "T", 0, 6, 2],
+    ]
+  },
+  infeasible: {
+    nodes: [["S", 10], ["A", 0], ["T", -10]],
+    edges: [
+      ["e1", "S", "A", 0, 4, 1],
+      ["e2", "A", "T", 0, 5, 1],
+    ]
+  },
+  cycle: {
+    nodes: [["S", 5], ["A", 0], ["B", 0], ["T", -5]],
+    edges: [
+      ["e1", "S", "A", 0, 5, 0],
+      ["e2", "A", "B", 1, 10, 4],
+      ["e3", "B", "A", 0, 5, -5],
+      ["e4", "B", "T", 0, 5, 0],
+    ]
+  }
+};
+
+function el(tag, props = {}, html) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "className") e.className = v;
+    else e[k] = v;
+  }
+  if (html !== undefined) e.innerHTML = html;
+  return e;
+}
+
+function addNode(id = "", balance = "") {
+  const tb = document.getElementById("nodeRows");
+  const tr = el("tr");
+  tr.appendChild(el("td", {className: "idcell"}));
+  tr.children[0].appendChild(el("input", {value: id, placeholder: "如 S1"}));
+  tr.appendChild(el("td"));
+  tr.children[1].appendChild(el("input", {value: String(balance), inputMode: "numeric", placeholder: "整数"}));
+  tr.appendChild(el("td", {className: "del", onclick: () => { tr.remove(); refresh(); }}, "✕"));
+  tb.appendChild(tr);
+  refresh();
+}
+
+function addEdge(vals = ["", "", "", "0", "", "0"]) {
+  const tb = document.getElementById("edgeRows");
+  const tr = el("tr");
+  const fields = ["eid", "from", "to", "lower", "upper", "cost"];
+  const placeholders = ["标识", "起点", "终点", "下界", "上界", "成本"];
+  fields.forEach((f, i) => {
+    const td = el("td", {className: (i < 3 ? "idcell" : "")});
+    td.appendChild(el("input", {value: String(vals[i]), inputMode: i < 3 ? "text" : "numeric",
+                                placeholder: placeholders[i]}));
+    tr.appendChild(td);
+  });
+  tr.appendChild(el("td", {className: "del", onclick: () => { tr.remove(); refresh(); }}, "✕"));
+  tb.appendChild(tr);
+  refresh();
+}
+
+function refresh() {
+  const nc = document.querySelectorAll("#nodeRows tr").length;
+  const ec = document.querySelectorAll("#edgeRows tr").length;
+  document.getElementById("nodeCount").textContent = nc + " / 12";
+  document.getElementById("edgeCount").textContent = ec + " / 36";
+  const addN = [...document.querySelectorAll("button")].find(b => b.textContent === "+ 站点");
+  const addE = [...document.querySelectorAll("button")].find(b => b.textContent === "+ 管路");
+  if (addN) addN.disabled = nc >= 12;
+  if (addE) addE.disabled = ec >= 36;
+}
+
+function fillExample(name) {
+  const ex = EXAMPLES[name];
+  document.getElementById("nodeRows").innerHTML = "";
+  document.getElementById("edgeRows").innerHTML = "";
+  ex.nodes.forEach(([id, b]) => addNode(id, b));
+  ex.edges.forEach(v => addEdge(v));
+  refresh();
+}
+
+function parseIntStrict(s) {
+  const t = String(s).trim();
+  if (!/^[+-]?\d+$/.test(t)) return null;
+  const n = Number(t);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+const FIELD_CN = {lower: "下界", upper: "上界", cost: "单位成本"};
+
+function collect() {
+  const fieldErrors = [];
+  const nodeRows = [...document.querySelectorAll("#nodeRows tr")];
+  const nodes = nodeRows.map((tr, i) => {
+    const id = tr.children[0].querySelector("input").value.trim();
+    const raw = tr.children[1].querySelector("input").value;
+    const balance = parseIntStrict(raw);
+    if (balance === null) {
+      fieldErrors.push({loc: ["nodes", i, "balance"],
+        msg: `站点 ${id || "#" + i} 的供需必须是整数（收到 "${raw.trim()}"）`});
+    }
+    return {id, balance};
+  });
+  const edgeRows = [...document.querySelectorAll("#edgeRows tr")];
+  const edges = edgeRows.map((tr, i) => {
+    const get = j => tr.children[j].querySelector("input").value;
+    const id = get(0).trim(), from = get(1).trim(), to = get(2).trim();
+    const nums = {};
+    [["lower", 3], ["upper", 4], ["cost", 5]].forEach(([k, j]) => {
+      const v = parseIntStrict(get(j));
+      if (v === null) {
+        fieldErrors.push({loc: ["edges", i, k],
+          msg: `管路 ${id || "#" + i} 的${FIELD_CN[k]}必须是整数（收到 "${get(j).trim()}"）`});
+      }
+      nums[k] = v;
+    });
+    return {id, from, to, ...nums};
+  });
+  return {payload: {nodes, edges}, fieldErrors};
+}
+
+async function submitSolve() {
+  const errBox = document.getElementById("errors");
+  const resBox = document.getElementById("result");
+  errBox.innerHTML = ""; resBox.innerHTML = "";
+  document.getElementById("submitStatus").textContent = "求解中…";
+
+  const {payload: body, fieldErrors} = collect();
+  if (fieldErrors.length) {
+    document.getElementById("submitStatus").textContent = "";
+    errBox.appendChild(renderErrors({errors: fieldErrors}));
+    return;
+  }
+  const key = document.getElementById("auditKey").value.trim();
+  if (key) body.audit_key = key;
+
+  let resp, data;
+  try {
+    resp = await fetch("/api/solve", {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body)
+    });
+    data = await resp.json();
+  } catch (e) {
+    document.getElementById("submitStatus").textContent = "";
+    errBox.innerHTML = `<div class="errors">请求失败：${e}</div>`;
+    return;
+  }
+  document.getElementById("submitStatus").textContent = "";
+
+  if (resp.status === 422) {
+    errBox.appendChild(renderErrors(data));
+    return;
+  }
+  if (resp.status === 409) {
+    errBox.innerHTML = `<div class="errors"><b>审计标识冲突（HTTP 409）</b>：${data.msg}<br>
+      <span class="loc">audit_key=${data.audit_key}</span></div>`;
+    return;
+  }
+
+  if (data.status === "idempotent_replay") {
+    resBox.appendChild(renderReplayBanner(data));
+    renderResult(data.result, resBox);
+  } else {
+    renderResult(data.result ?? data, resBox);
+    if (data.status === "stored") {
+      const b = el("div", {className: "banner ok"},
+        `审计记录已保存 <span class="kpi">audit_key=<b>${data.audit_key}</b> · 指纹 ${data.fingerprint.slice(0, 16)}…</span>`);
+      resBox.insertBefore(b, resBox.firstChild);
+    }
+  }
+}
+
+function renderErrors(data) {
+  const d = el("div", {className: "errors"});
+  d.appendChild(el("b", {}, "输入不合法（HTTP 422）："));
+  const ul = el("ul");
+  (data.errors || []).forEach(err => {
+    const loc = (err.loc || []).filter(x => x !== "").join(" / ") || "(根)";
+    ul.appendChild(el("li", {}, `<span class="loc">[${loc}]</span> ${err.msg}`));
+  });
+  d.appendChild(ul);
+  return d;
+}
+
+function renderReplayBanner(data) {
+  return el("div", {className: "banner warn"},
+    `同载荷重传 · 返回原记录 <span class="kpi">audit_key=<b>${data.audit_key}</b> · 原始创建 ${data.created_at}</span>`);
+}
+
+function rcClass(v) { return v < 0 ? "rc-neg" : v === 0 ? "rc-zero" : ""; }
+
+function renderResult(r, box) {
+  if (r.status === "feasible") {
+    const optOk = r.optimality && r.optimality.all_reduced_costs_non_negative;
+    box.appendChild(el("div", {className: "banner ok"},
+      `✓ 可行且为最小费用流 <span class="kpi">总成本 <b>${r.total_cost}</b></span>
+       <span class="kpi">总流量 <b>${r.total_flow}</b></span>
+       <span class="kpi">消除负环 <b>${r.canceled_negative_cycles}</b> 个</span>
+       <span class="tag ${optOk ? "good" : "no"}">${optOk ? "约化费用证书通过" : "证书异常"}</span>`));
+
+    box.appendChild(el("div", {className: "section-title"}, "逐边流量与约化费用复算"));
+    const t = el("table", {className: "res-table"});
+    t.innerHTML = `<thead><tr>
+      <th>管路</th><th>路径</th><th class="num">下界</th><th class="num">上界</th>
+      <th class="num">单位成本</th><th class="num">流量</th><th class="num">费用小计</th>
+      <th class="num">正向残量</th><th class="num">正向约化费</th>
+      <th class="num">反向残量</th><th class="num">反向约化费</th></tr></thead>`;
+    const tb = el("tbody");
+    r.edges.forEach(e => {
+      const tr = el("tr");
+      tr.innerHTML = `<td class="nowrap">${e.id}</td><td class="nowrap muted">${e.from} → ${e.to}</td>
+        <td class="num">${e.lower}</td><td class="num">${e.upper}</td>
+        <td class="num">${e.cost}</td><td class="num"><b>${e.flow}</b></td>
+        <td class="num">${e.cost_contribution}</td>
+        <td class="num">${e.forward_residual}</td>
+        <td class="num ${rcClass(e.forward_reduced_cost ?? 0)}">${e.forward_reduced_cost === null ? "—" : e.forward_reduced_cost}</td>
+        <td class="num">${e.backward_residual}</td>
+        <td class="num ${rcClass(e.backward_reduced_cost ?? 0)}">${e.backward_reduced_cost === null ? "—" : e.backward_reduced_cost}</td>`;
+      tb.appendChild(tr);
+    });
+    t.appendChild(tb); box.appendChild(wrapPanel(t));
+
+    box.appendChild(el("div", {className: "section-title"}, "站点势与净供需复算"));
+    const nt = el("table", {className: "res-table"});
+    nt.innerHTML = `<thead><tr><th>站点</th><th class="num">势 p</th><th class="num">要求净输出</th>
+      <th class="num">流入</th><th class="num">流出</th><th class="num">实际净输出</th><th>守恒</th></tr></thead><tbody>`;
+    r.nodes.forEach(n => {
+      const tr = el("tr");
+      tr.innerHTML = `<td>${n.id}</td><td class="num">${r.potentials[n.id]}</td>
+        <td class="num">${n.balance}</td><td class="num">${n.inflow}</td>
+        <td class="num">${n.outflow}</td><td class="num">${n.net_out}</td>
+        <td>${n.ok ? '<span class="tag good">满足</span>' : '<span class="tag no">违反</span>'}</td>`;
+      nt.lastElementChild.appendChild(tr);
+    });
+    box.appendChild(wrapPanel(nt));
+
+    const det = el("details");
+    det.appendChild(el("summary", {}, "算法轨迹与下界消去后的调整供需"));
+    det.appendChild(el("div", {className: "chips"},
+      r.algorithm.map(a => `<span>${a}</span>`).join("")));
+    det.appendChild(el("pre", {className: "ev"},
+      JSON.stringify({adjusted_balances: r.adjusted_balances,
+                      optimality: r.optimality}, null, 2)));
+    box.appendChild(det);
+  } else if (r.status === "infeasible") {
+    box.appendChild(el("div", {className: "banner bad"},
+      `✗ 无可行流 <span class="kpi">超源需求 <b>${r.required_super_flow}</b>，
+       仅送达 <b>${r.achieved_super_flow}</b>，缺口 <b>${r.deficit}</b></span>`));
+
+    const sec = (title, node) => {
+      box.appendChild(el("div", {className: "section-title"}, title));
+      box.appendChild(node);
+    };
+    const ut = el("table", {className: "res-table"});
+    ut.innerHTML = `<thead><tr><th>站点</th><th>类型</th><th class="num">未满足量</th></tr></thead><tbody>`;
+    r.unmet.forEach(u => {
+      ut.lastElementChild.appendChild(el("tr", {},
+        `<td>${u.node}</td><td>${u.kind === "supply_not_dispatched" ? "供应无法送出" : "需求未被满足"}</td>
+         <td class="num">${u.amount}</td>`));
+    });
+    sec("失败证据 ①：未满足的供需", wrapPanel(ut));
+
+    sec("失败证据 ②：残量网络中从超源可达的站点（最小割 S 侧）",
+      el("div", {className: "chips"}, r.residual_reachable_nodes.map(x => `<span>${x}</span>`).join("") || "<span class='muted'>（空）</span>"));
+
+    const ct = el("table", {className: "res-table"});
+    ct.innerHTML = `<thead><tr><th>割上管路</th><th>路径</th><th class="num">流量</th><th class="num">上界</th><th>已顶满</th></tr></thead><tbody>`;
+    r.saturated_cut_edges.forEach(c => {
+      ct.lastElementChild.appendChild(el("tr", {},
+        `<td>${c.edge}</td><td class="muted">${c.from} → ${c.to}</td>
+         <td class="num">${c.flow}</td><td class="num">${c.upper}</td>
+         <td>${c.saturated ? '<span class="tag no">饱和</span>' : ""}</td>`));
+    });
+    sec("失败证据 ③：横切最小割、被顶到上界的管路", wrapPanel(ct));
+
+    box.appendChild(el("details", {}, ""));
+    const det = box.lastElementChild;
+    det.appendChild(el("summary", {}, "下界消去后的调整供需"));
+    det.appendChild(el("pre", {className: "ev"}, JSON.stringify(r.adjusted_balances, null, 2)));
+  }
+}
+
+function wrapPanel(node) {
+  const p = el("div", {className: "panel"});
+  p.appendChild(node);
+  return p;
+}
+
+addNode("S", 6); addNode("A", 0); addNode("B", 0); addNode("T", -6);
+[["e1","S","A","0","4","2"],["e2","S","B","0","6","5"],["e3","A","B","0","3","1"],
+ ["e4","A","T","0","5","7"],["e5","B","T","0","6","2"]].forEach(v => addEdge(v));
+refresh();
+</script>
+</body>
+</html>

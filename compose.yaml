@@ -1,0 +1,32 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cryo-calibration-flow:latest
+    container_name: cryo-flow-web
+    ports:
+      # 宿主机端口可通过 .env 的 HOST_PORT 配置（默认 8080）
+      - "${HOST_PORT:-8080}:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/healthz', timeout=3).status==200 else 1)"]
+      interval: 5s
+      timeout: 4s
+      retries: 12
+      start_period: 6s
+
+  verify:
+    image: cryo-calibration-flow:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: cryo-flow-verify
+    command: ["python", "scripts/verify_all.py"]
+    environment:
+      WEB_BASE_URL: http://web:8080
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: "no"
