@@ -27,8 +27,14 @@
 
 - 请求带 `audit_key` 时，服务端对去掉该字段后的载荷做规范化 SHA-256 指纹并留档；
 - **同载荷重传**：返回原始记录（`idempotent_replay`，含原创建时间），不重新求解；
-- **改载荷复用同一标识**：HTTP 409 `audit_conflict` 拒绝，原记录不受影响；
-- 记录可经 `GET /api/audit/{key}` 取回。
+  **同标识同载荷的并发提交也只形成一份最终记录**——首个请求负责求解落盘，
+  其余并发请求等待其完成后取得同一 `created_at` 与完整、可复算的原始结果，
+  绝不会回放尚未完成的半成品；
+- **改载荷复用同一标识**：HTTP 409 `audit_conflict` 立即拒绝（即使首个请求仍在
+  求解），原记录不受影响；
+- **求解失败 / 运行异常**：返回 500 并释放预留，不留半成品；同标识请求可立即
+  重试，等待中的同载荷请求会被唤醒并接管求解，不会永久卡死；
+- 记录可经 `GET /api/audit/{key}` 取回（求解进行中返回 404，完成后可取回）。
 
 ## 运行（Docker Compose）
 
@@ -40,8 +46,8 @@ docker compose up -d web
 
 健康检查：`GET /healthz`（Compose 已配置 healthcheck）。
 
-一次性核对（求解器测试 + 镜像构建 + 本题 API 冒烟），`verify` 容器在
-`web` 健康后启动、自行退出并以退出码报告：
+一次性核对（求解器测试 + 镜像构建 + API 冒烟 + 并发幂等/失败恢复验收），
+`verify` 容器在 `web` 健康后启动、自行退出并以退出码报告：
 
 ```bash
 docker compose up --abort-on-container-exit --exit-code-from verify verify
@@ -53,7 +59,7 @@ docker compose up --abort-on-container-exit --exit-code-from verify verify
 ```bash
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
-python -m pytest tests -q          # 41 项测试（含 100 个满规模 fuzz 算例）
+python -m pytest tests -q          # 48 项测试（含并发幂等与 100 个满规模 fuzz 算例）
 uvicorn app.main:app --port 8080
 python scripts/verify_all.py       # 需先启动服务（WEB_BASE_URL 可覆盖）
 ```
